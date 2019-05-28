@@ -381,11 +381,11 @@ bool BTree::insert(int key, int rid) {
     bool ret = find_leaf_node_by_key(key, &leafNode); //
     assert(ret != false);
 
-//    if (IS_NODE_FULL(leafNode)) {
-//        // Splitting a leaf node
-//        leafNode = split(leafNode, key);
-//    }
-    // overwrite record on leafNode in indexFile
+    if (IS_NODE_FULL(leafNode)) {
+        // Splitting a leaf node
+        leafNode = split(leafNode, key);
+    }
+     //overwrite record on leafNode in indexFile
 
     ret = leafNode->insertDataEntry(key, rid);
     assert(ret != false);
@@ -533,9 +533,9 @@ Node* BTree::split(Node *node, int key) {
     // rnode의 BID는 lnode의 BID + 1
     // -> 새로운 노드가 추가 되었으므로 rnode 이후 모든 Node의 BID가 바뀜.
     enum {LEFT = true, RIGHT = false};
-//    bp_copy_node(lnode, node, LEFT, split_factor + 1);
-//    bp_copy_node(rnode, node, RIGHT, split_factor);
-//
+    bp_copy_node(lnode, node, LEFT, split_factor + 1);
+    bp_copy_node(rnode, node, RIGHT, split_factor);
+
     // lnode, rnode NextBID init
     if (lnode->NextBID != 0)
         rnode->NextBID = lnode->NextBID + 1;
@@ -543,7 +543,6 @@ Node* BTree::split(Node *node, int key) {
         rnode->NextBID = lnode->NextBID;
     lnode->NextBID = rnode->myBID;
     // indexFile -> lnode 위치 + 1 부터 write rnode data (BlockSize 만큼)
-    //
     if (node == root) { // 첫번째 Split이 발생한다면 Node는 분명 Root임이 틀림없죠!ㅋ
         node = new Node(blockSize); // 새로운 root노드 생성
         node->NextlevelBID = lnode->myBID;
@@ -566,7 +565,7 @@ Node* BTree::split(Node *node, int key) {
         }
         delete node;
     }
-    
+
     // parent 노드에 rnode 추가 <key, BID>
     parent->insertIndexEntry(key, rnode->myBID);
 
@@ -575,15 +574,15 @@ Node* BTree::split(Node *node, int key) {
     // update non-leaf node's BID for non-leaf node's NextlevelBID, entry's BID > lnode BID, ++BID
     // (rnode path 오른쪽 Block 들에 대해 ++BID)
     update_BID_on_indexFile(lnode->myBID);
-    rootBID = ++root->myBID;
-    // update rnode on indexFile
-    update_rnode_on_indexFile(rnode);
-    // update file_header
-    update_file_header_on_indexFile();
-    // update root on indexFile
-    if (parent == root) {
-        update_root_on_indexFile();
-    }
+//    rootBID = ++root->myBID;
+//    // update rnode on indexFile
+//    update_rnode_on_indexFile(rnode);
+//    // update file_header
+//    update_file_header_on_indexFile();
+//    // update root on indexFile
+//    if (parent == root) {
+//        update_root_on_indexFile();
+//    }
     return (split_key < key ? lnode: rnode);
 }
 Node* BTree::_split(Node *node, int key) {
@@ -818,29 +817,30 @@ bool BTree::update_leaf_node_on_indexFile(Node* v) {
 }
 bool BTree::update_BID_on_indexFile(int lnode_BID) {
     fstream indexFile(filename, ios::in | ios::out | ios::binary);
+    // have to fix error line 821
     int first_non_leaf_node_BID = find_last_leaf_node_BID() + 1;
-    indexFile.seekg(first_non_leaf_node_BID, ios::beg);
-    indexFile.seekp(first_non_leaf_node_BID, ios::beg);
-    for (int j = 0; j < rootBID - first_non_leaf_node_BID; ++j) {
-        Node *tmp = new Node(blockSize);
-        indexFile.read(reinterpret_cast<char*>(&tmp->NextlevelBID), sizeof(int));
-        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-            indexFile.read(reinterpret_cast<char*>(&tmp->entries[i].key), sizeof(int));
-            indexFile.read(reinterpret_cast<char*>(&tmp->entries[i].BID), sizeof(int));
-        }
-        if (tmp->NextlevelBID > lnode_BID)
-            ++tmp->NextlevelBID;
-        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-            if (tmp->entries[i].BID > lnode_BID)
-                ++tmp->entries[i].BID;
-        }
-        indexFile.write(reinterpret_cast<char*>(&tmp->NextlevelBID), sizeof(int));
-        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-            indexFile.write(reinterpret_cast<char*>(&tmp->entries[i].key), sizeof(int));
-            indexFile.write(reinterpret_cast<char*>(&tmp->entries[i].BID), sizeof(int));
-        }
-        delete tmp;
-    }
+//    indexFile.seekg(first_non_leaf_node_BID, ios::beg);
+//    indexFile.seekp(first_non_leaf_node_BID, ios::beg);
+//    for (int j = 0; j < rootBID - first_non_leaf_node_BID; ++j) {
+//        Node *tmp = new Node(blockSize);
+//        indexFile.read(reinterpret_cast<char*>(&tmp->NextlevelBID), sizeof(int));
+//        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+//            indexFile.read(reinterpret_cast<char*>(&tmp->entries[i].key), sizeof(int));
+//            indexFile.read(reinterpret_cast<char*>(&tmp->entries[i].BID), sizeof(int));
+//        }
+//        if (tmp->NextlevelBID > lnode_BID)
+//            ++tmp->NextlevelBID;
+//        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+//            if (tmp->entries[i].BID > lnode_BID)
+//                ++tmp->entries[i].BID;
+//        }
+//        indexFile.write(reinterpret_cast<char*>(&tmp->NextlevelBID), sizeof(int));
+//        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+//            indexFile.write(reinterpret_cast<char*>(&tmp->entries[i].key), sizeof(int));
+//            indexFile.write(reinterpret_cast<char*>(&tmp->entries[i].BID), sizeof(int));
+//        }
+//        delete tmp;
+//    }
     return true;
 }
 int BTree::find_last_leaf_node_BID () {
