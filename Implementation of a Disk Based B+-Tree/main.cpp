@@ -116,6 +116,8 @@ private:
     int depth;      // check whether a node is leaf or not.
     Node* root;
     vector<Node*> path_root_to_leaf;
+    
+    friend class Node;
 };
 
 // TEST
@@ -258,36 +260,34 @@ bool Node::insertEntry(int key, int BID) {
         return insertIndexEntry(key, BID);
 }
 bool Node::insertIndexEntry(int key, int BID) {
-    if (IS_FULL()) {
-        // split!
-    }
-    else {
-        bool ret = this->fill_entry(key, BID);
-        assert(ret != false);
-        for (int i = cnt - 1; i > 0; --i) {
-            if (entries[i].key > entries[i - 1].key ) {
-                swap(entries[i], entries[i - 1]);
+    int tmp = this->NextlevelBID;
+    for (int i = 0; i <= this->cnt; ++i) {
+        if (tmp < BID) {
+            // 해당 엔트리 right shift
+            for (int j = cnt; i < j; --j) {
+                swap(this->entries[j], this->entries[j - 1]);
+                ++entries[j].BID;
             }
+            // insert <key, BID>
+            this->entries[i].key = key;
+            this->entries[i].BID = BID;
+            ++this->cnt;
+            break;
         }
-        return true;
+        else
+            tmp = this->entries[i].BID;
     }
-    return false;
+    return true;
 }
 bool Node::insertDataEntry(int key, int value) {
-    if (IS_FULL()) {
-        // Error : not excuted split!
-        return false;
-    }
-    else {
-        bool ret = this->fill_entry(key, value);
-        assert(ret != false);
-        for (int i = cnt - 1; i > 0; --i) {
-            if (entries[i - 1].key > entries[i].key ) {
-                swap(entries[i], entries[i - 1]);
-            }
+    bool ret = this->fill_entry(key, value);
+    assert(ret != false);
+    for (int i = cnt - 1; i > 0; --i) {
+        if (entries[i - 1].key > entries[i].key ) {
+            swap(entries[i], entries[i - 1]);
         }
-        return true;
     }
+    return true;
 }
 void Node::copy_Node(Node* origin) {
     this->NextBID = origin->NextBID;
@@ -358,6 +358,7 @@ BTree::BTree(const char *filename) {
 }
 
 bool BTree::insert(int key, int rid) {
+    cout << "<<<<<<<Insertion>>>>>>>   key : " << key << endl;
     /* Insertion
      1. Find the leaf node in which the search-key value would appear
      2. If the search-key value is already present in the leaf node
@@ -382,10 +383,10 @@ bool BTree::insert(int key, int rid) {
     bool IS_SPLIT = false;
     Node *leafNode;
     bool ret = find_leaf_node_by_key(key, &leafNode); //
-    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-        cout << (leafNode)->entries[i].key << " " << (leafNode)->entries[i].value << endl;
-    }
-    cout << leafNode->NextBID << endl;
+//    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+//        cout << (leafNode)->entries[i].key << " " << (leafNode)->entries[i].value << endl;
+//    }
+//    cout << leafNode->NextBID << endl;
     assert(ret != false);
 
     if (IS_NODE_FULL(leafNode)) {
@@ -395,11 +396,11 @@ bool BTree::insert(int key, int rid) {
     }
     //overwrite record on leafNode in indexFile
     
-    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-        cout << leafNode->entries[i].key << " " << leafNode->entries[i].value << " " << leafNode->entries[i].BID << " /";
-    }
-    cout << endl;
-    
+//    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+//        cout << leafNode->entries[i].key << " " << leafNode->entries[i].value << " " << leafNode->entries[i].BID << " /";
+//    }
+//    cout << endl;
+//
     ret = leafNode->insertDataEntry(key, rid);
     assert(ret != false);
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
@@ -410,6 +411,7 @@ bool BTree::insert(int key, int rid) {
     if (IS_SPLIT) {
         update_parent_entry(leafNode->parent, leafNode);
         update_non_leaf_node_on_indexFile(leafNode->parent);
+        cout << "leafNode->parent->myBID : " << leafNode->parent->myBID << endl;
         cout << leafNode->parent->NextlevelBID << " ";
         for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
             cout << leafNode->parent->entries[i].key << " " <<  leafNode->parent->entries[i].BID << " /";
@@ -551,6 +553,8 @@ Node* BTree::split(Node *node, int key) {
     
     int split_factor = (number_of_entries_per_node(blockSize) + 1) >> 1;
     int split_key = node->entries[split_factor].key;
+    bool NODE_IS_ROOT = false;
+    cout << "split key : " << split_key << endl;
     // 해당 노드의 parent 노드를 찾음
     Node *parent = node->parent;
     Node *lnode, *rnode;
@@ -582,7 +586,7 @@ Node* BTree::split(Node *node, int key) {
     if (node == root) { // 첫번째 Split이 발생한다면 Node는 분명 Root임이 틀림없죠!ㅋ
         node = new Node(blockSize); // 새로운 root노드 생성
         node->NextlevelBID = lnode->myBID;
-        node->myBID = root->myBID + 2;
+        node->myBID = root->myBID + 1;
         node->leaf = false;
         
         // have to set new Node's BID
@@ -594,6 +598,7 @@ Node* BTree::split(Node *node, int key) {
         lnode->parent_BID = node->myBID;
         rnode->parent_BID = node->myBID;
         parent =  node;
+        NODE_IS_ROOT = true;
     }
     else {
         if (IS_NODE_FULL(parent)) {
@@ -613,8 +618,9 @@ Node* BTree::split(Node *node, int key) {
     cout << rnode->NextBID << " ";
     cout << endl;
     // parent 노드에 rnode 추가 <key, BID>
-    parent->insertIndexEntry(rnode->entries[0].key, rnode->myBID);
 
+    parent->insertIndexEntry(rnode->entries[0].key, rnode->myBID);
+    
     if (parent != root) {
         // apply to bin file
         // 1. update BID for bigger than lnode BID except root
@@ -625,20 +631,60 @@ Node* BTree::split(Node *node, int key) {
         // update non-leaf node's BID for non-leaf node's NextlevelBID, entry's BID > lnode BID, ++BID
         // (rnode path 오른쪽 Block 들에 대해 ++BID)
         update_BID_on_indexFile(lnode->myBID);
-        rootBID = ++root->myBID;
     }
+    rootBID = ++root->myBID;
     // update lnode on indexFile
     update_lnode_on_indexFile(lnode);
     // update rnode on indexFile
     update_rnode_on_indexFile(rnode);
     // update root on indexFile
-    if (parent == root) {
+    fstream indexFile(filename, ios::in| ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "START Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    indexFile.close();
+    if (NODE_IS_ROOT) {
         rootBID = root->myBID;
         update_root_on_indexFile();
     }
     // update file_header
-    update_file_header_on_indexFile();
+    indexFile.open(filename, ios::in | ios::binary);
     
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+
+    update_file_header_on_indexFile();
+    indexFile.open(filename, ios::in | ios::binary);
+    
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+
     return (key < split_key ? lnode: rnode);
 }
 Node* BTree::_split(Node *node, int key) {
@@ -648,6 +694,8 @@ Node* BTree::_split(Node *node, int key) {
     // 3. non-leaf node status 조정
     int split_factor = (number_of_entries_per_node(blockSize) + 1) >> 1;
     int split_key = node->entries[split_factor].key;
+    bool NODE_IS_ROOT = false;
+    cout << "split key : " << split_key << endl;
     // 해당 노드의 parent 노드를 찾음
     Node *parent = node->parent;
     Node *lnode, *rnode;
@@ -675,9 +723,9 @@ Node* BTree::_split(Node *node, int key) {
     if (node == root) { // 첫번째 Split이 발생한다면 Node는 분명 Root임이 틀림없죠!ㅋ
         node = new Node(blockSize); // 새로운 root노드 생성
         node->NextlevelBID = lnode->myBID;
-        node->myBID = root->myBID + 2;
+        node->myBID = root->myBID + 1;
         node->leaf = false;
-        
+        NODE_IS_ROOT = true;
         // have to set new Node's BID
         root = node;
         ++depth;
@@ -706,15 +754,17 @@ Node* BTree::_split(Node *node, int key) {
         
         // update non-leaf node's BID for non-leaf node's NextlevelBID, entry's BID > lnode BID, ++BID
         // (rnode path 오른쪽 Block 들에 대해 ++BID)
-        update_BID_on_indexFile(lnode->myBID);
-        rootBID = ++root->myBID;
+        
+
     }
+    update_BID_on_indexFile(lnode->myBID);
+    rootBID = ++root->myBID;
     // update lnode on indexFile
     update_lnode_on_indexFile(lnode);
     // update rnode on indexFile
     update_rnode_on_indexFile(rnode);
     // update root on indexFile
-    if (parent == root) {
+    if (NODE_IS_ROOT) {
         rootBID = root->myBID;
         update_root_on_indexFile();
     }
@@ -740,6 +790,27 @@ bool BTree::find_leaf_node_by_key(int key, Node **node) {
         target->parent = path_root_to_leaf.back();
         path_root_to_leaf.push_back(target);
     }
+    if (root->is_leaf()) {
+        cout << "Root\n";
+        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+            cout << root->entries[i].key << " " << root->entries[i].value << " ";
+        }
+        cout << root->NextBID << endl;
+    }
+    else {
+        cout << "Root\n";
+        cout << root->NextlevelBID << " ";
+        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+            cout << root->entries[i].key << " " << root->entries[i].BID << " ";
+        }
+        cout << endl;
+    }
+    
+    cout << "Target\n";
+    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+        cout << target->entries[i].key << " " << target->entries[i].value << " ";
+    }
+    cout << target->NextBID << endl;
     *node = target;
     return true;
 }
@@ -747,12 +818,14 @@ bool BTree::find_leaf_node_by_key(int key, Node **node) {
 int BTree::find_entry_by_key(Node *node, int key) {
     // 리프노드가 아닌 경우 해당 키 범위에 해당 되는 다음 레벨 노드의 BID를 반환.
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-        if (node->entries[i].key > key) {
+        if (node->entries[i].key != 0 && node->entries[i].key > key) {
             if (i != 0) {
                 return node->entries[i - 1].BID;
             }
             return node->NextlevelBID;
         }
+        else if (node->entries[i].key == 0)
+            return node->entries[i - 1].BID;
     }
     return 0;    // return NULL value. ( 0 == NULL on BID )
 }
@@ -846,6 +919,7 @@ bool BTree::update_file_header_on_indexFile(){
     return true;
 }
 bool BTree::update_root_on_indexFile() {
+    cout << "BTree::update_root_on_indexFile() : " << root->myBID << endl;
     fstream indexFile;
     indexFile.open(filename, ios::in | ios::app | ios::binary);
     indexFile.seekp(root->myBID, ios::end);
@@ -859,6 +933,7 @@ bool BTree::update_root_on_indexFile() {
 }
 
 bool BTree::update_lnode_on_indexFile(Node* lnode) {
+    cout << "BTree::update_lnode_on_indexFile(Node* lnode) : " << lnode->myBID << endl;
     fstream indexFile(filename, ios::in | ios::out | ios::binary);
     indexFile.seekp(physical_offset_of_PageID(lnode->myBID, blockSize), ios::beg);
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
@@ -870,19 +945,108 @@ bool BTree::update_lnode_on_indexFile(Node* lnode) {
     return true;
 }
 bool BTree::update_rnode_on_indexFile(Node* rnode) {
-    fstream indexFile(filename, ios::in | ios::app | ios::binary);
-    indexFile.seekp(physical_offset_of_PageID(rnode->myBID, blockSize), ios::beg);
+    cout << "BTree::update_rnode_on_indexFile(Node* rnode) : " << rnode->myBID << endl;
+    fstream indexFile(filename, ios::in| ios::binary);
+    fstream tmp("tmp", ios::out | ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    int data;
+    indexFile.seekg(0, ios::beg);
+    for (int i = 0; i < size; ++i) {
+        indexFile.read(reinterpret_cast<char*>(&data), sizeof(int));
+        tmp.write(reinterpret_cast<char*>(&data), sizeof(int));
+    }
+    indexFile.close();
+    tmp.close();
+    
+    // copy tmp to indexFile
+    indexFile.open(filename, ios::out | ios::binary);
+    tmp.open("tmp", ios::in | ios::binary);
+    
+    cout << "tmp file contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        tmp.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    
+    
+    
+    indexFile.seekp(0, ios::beg);
+    tmp.seekg(0, ios::beg);
+    
+    // file_header copy
+    for (int i = 0; i < 3; ++i) {
+        tmp.read(reinterpret_cast<char*>(&data), sizeof(int));
+        indexFile.write(reinterpret_cast<char*>(&data), sizeof(int));
+        --size;
+    }
+    // copy before rnode's BID
+    for (int i = 1; i < rnode->myBID; ++i) {
+        for (int j = 0; j < number_of_data_per_node(blockSize); ++j) {
+            tmp.read(reinterpret_cast<char*>(&data), sizeof(int));
+            indexFile.write(reinterpret_cast<char*>(&data), sizeof(int));
+            --size;
+        }
+    }
+    
+    // write rnode on indexFile
+//    indexFile.seekp(physical_offset_of_PageID(rnode->myBID, blockSize), ios::beg);
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
         indexFile.write(reinterpret_cast<char*>(&rnode->entries[i].key), sizeof(int));
         indexFile.write(reinterpret_cast<char*>(&rnode->entries[i].value), sizeof(int));
     }
     indexFile.write(reinterpret_cast<char*>(&rnode->NextBID), sizeof(int));
+    
+    cout << "back data : ";
+    while (size != 0) {
+        tmp.read(reinterpret_cast<char*>(&data), sizeof(int));
+        indexFile.write(reinterpret_cast<char*>(&data), sizeof(int));
+        cout << data << " ";
+        --size;
+    }
+    cout << endl;
     indexFile.close();
+    indexFile.open(filename, ios::in | ios::binary);
+    
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "!!!!END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
     return true;
 }
 
 bool BTree::update_non_leaf_node_on_indexFile(Node *v) {
+    cout << "BTree::update_non_leaf_node_on_indexFile(Node *v) : " << v->myBID << endl;
     fstream indexFile(filename, ios::in | ios::out | ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "START Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
     indexFile.seekp(physical_offset_of_PageID(v->myBID, blockSize), ios::beg);
     indexFile.write(reinterpret_cast<char*>(&v->NextlevelBID), sizeof(int));
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
@@ -890,10 +1054,35 @@ bool BTree::update_non_leaf_node_on_indexFile(Node *v) {
         indexFile.write(reinterpret_cast<char*>(&v->entries[i].BID), sizeof(int));
     }
     indexFile.close();
+    indexFile.open(filename, ios::in | ios::binary);
+    
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
     return true;
 }
 bool BTree::update_leaf_node_on_indexFile(Node* v) {
+    cout << "BTree::update_leaf_node_on_indexFile(Node* v) : " << v->myBID << endl;
     fstream indexFile(filename, ios::in | ios::out | ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "START Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
     indexFile.seekp(physical_offset_of_PageID(v->myBID, blockSize), ios::beg);
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
         indexFile.write(reinterpret_cast<char*>(&v->entries[i].key), sizeof(int));
@@ -901,28 +1090,47 @@ bool BTree::update_leaf_node_on_indexFile(Node* v) {
     }
     indexFile.write(reinterpret_cast<char*>(&v->NextBID), sizeof(int));
     indexFile.close();
+    indexFile.open(filename, ios::in | ios::binary);
+    
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
     return true;
 }
 bool BTree::update_BID_on_indexFile(int BID) {
+    cout << "BTree::update_BID_on_indexFile : " << BID << endl;
     fstream indexFile(filename, ios::in | ios::out | ios::binary);
     // have to fix error line 821
-//    int first_non_leaf_node_BID = find_last_leaf_node_BID() + 1;
+    int first_non_leaf_node_BID = find_last_leaf_node_BID() + 1;
+    for (int i = BID + 1; i < first_non_leaf_node_BID; ++i) {
+        Node* v = find_Node_by_BID(i);
+        ++v->NextBID;
+        update_leaf_node_on_indexFile(v);
+    }
 ////    if (first_non_leaf_node_BID > rootBID) {
 ////        return true;
 ////    }
     indexFile.seekg(physical_offset_of_PageID(BID, blockSize), ios::beg);
     indexFile.seekp(physical_offset_of_PageID(BID, blockSize), ios::beg);
-    for (int j = 0; j < rootBID - BID; ++j) {
+    for (int j = 0; j < rootBID - first_non_leaf_node_BID; ++j) {
         Node *tmp = new Node(blockSize);
         indexFile.read(reinterpret_cast<char*>(&tmp->NextlevelBID), sizeof(int));
         for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
             indexFile.read(reinterpret_cast<char*>(&tmp->entries[i].key), sizeof(int));
             indexFile.read(reinterpret_cast<char*>(&tmp->entries[i].BID), sizeof(int));
         }
-        if (tmp->NextlevelBID > BID)
+        if (tmp->NextlevelBID > first_non_leaf_node_BID)
             ++tmp->NextlevelBID;
         for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-            if (tmp->entries[i].BID > BID)
+            if (tmp->entries[i].BID > first_non_leaf_node_BID)
                 ++tmp->entries[i].BID;
         }
         indexFile.write(reinterpret_cast<char*>(&tmp->NextlevelBID), sizeof(int));
@@ -938,38 +1146,26 @@ int BTree::find_last_leaf_node_BID () {
     ifstream indexFile(filename, ios::in | ios::binary);
     int last_leaf_node_BID = 0;
     
-//    int NULL_BID(0), NextBID;
-//    indexFile.seekg(12 + blockSize - 4, ios::beg); // current node's nextBID poistion
-//    do {
-//        indexFile.read(reinterpret_cast<char*>(&NextBID), sizeof(int));
-//        ++last_leaf_node_BID;
-//        if (last_leaf_node_BID < rootBID)
-//            indexFile.seekg(12, ios::cur);
-//    } while (NextBID != NULL_BID);
+    int NULL_BID(0), NextBID;
+    indexFile.seekg(12 + blockSize - 4, ios::beg); // current node's nextBID poistion
+    do {
+        indexFile.read(reinterpret_cast<char*>(&NextBID), sizeof(int));
+        ++last_leaf_node_BID;
+        if (last_leaf_node_BID < rootBID)
+            indexFile.seekg(12, ios::cur);
+    } while (NextBID != NULL_BID);
     return last_leaf_node_BID;
 }
 
 bool BTree::update_parent_entry(Node *parent, Node* child) {
-    bool flag = false;
-    if (parent->entries[0].value != 0) {
-        flag = true;
-    }
-    if (flag) {
-        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-            if (parent->entries[i].value == child->myBID) {
-                parent->entries[i].key = child->entries[0].key;
-                break;
-            }
+//    if (key == 415) {
+//        return true;
+//    }
+    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+        if (parent->entries[i].BID == child->myBID) {
+            parent->entries[i].key = child->entries[0].key;
+            break;
         }
     }
-    else {
-        for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
-            if (parent->entries[i].BID == child->myBID) {
-                parent->entries[i].key = child->entries[0].key;
-                break;
-            }
-        }
-    }
-
     return true;
 }
