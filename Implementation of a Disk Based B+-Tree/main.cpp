@@ -92,6 +92,7 @@ private:
     bool insert_key(Node *target, int key, int value);
     void path_init();
     void bp_copy_node (Node *target_node, Node *node, bool start, int size) ;
+    void bp_copy_non_leaf_node(Node *target_node, Node *node, bool start, int size);
     bool update_parent_entry(Node *parent, Node* child);
     
     // shifting entries to left and return NextlevelBID before shifting
@@ -101,6 +102,8 @@ private:
     bool update_root_on_indexFile();
     bool update_lnode_on_indexFile(Node* lnode);
     bool update_rnode_on_indexFile(Node* rnode);
+    bool update_non_leaf_lnode_on_indexFile(Node *lnode);
+    bool update_non_leaf_rnode_on_indexFile(Node *rnode);
     bool update_non_leaf_node_on_indexFile(Node *v);
     bool update_leaf_node_on_indexFile(Node* v);
     bool update_BID_on_indexFile(int lnode_BID);
@@ -239,7 +242,7 @@ Node::Node(int blockSize) {
     entries = new bp_entry[number_of_entries_per_node(blockSize)];
 }
 bool Node::fill_entry(int key, int value) {
-    if (is_leaf()) {
+    if (this->is_leaf()) {
         entries[cnt].key = key;
         entries[cnt].value = value;
         ++cnt;
@@ -260,6 +263,13 @@ bool Node::insertEntry(int key, int BID) {
         return insertIndexEntry(key, BID);
 }
 bool Node::insertIndexEntry(int key, int BID) {
+    // can get into last loaction?
+    if (this->entries[cnt-1].key < key) {
+        this->entries[cnt].key = key;
+        this->entries[cnt].BID = BID;
+        ++cnt;
+        return true;
+    }
     int tmp = this->NextlevelBID;
     for (int i = 0; i <= this->cnt; ++i) {
         if (tmp < BID) {
@@ -630,8 +640,9 @@ Node* BTree::split(Node *node, int key) {
         
         // update non-leaf node's BID for non-leaf node's NextlevelBID, entry's BID > lnode BID, ++BID
         // (rnode path 오른쪽 Block 들에 대해 ++BID)
-        update_BID_on_indexFile(lnode->myBID);
+//        update_BID_on_indexFile(lnode->myBID);
     }
+    update_BID_on_indexFile(lnode->myBID);
     rootBID = ++root->myBID;
     // update lnode on indexFile
     update_lnode_on_indexFile(lnode);
@@ -669,7 +680,7 @@ Node* BTree::split(Node *node, int key) {
         cout << x << " ";
     }
     cout << endl;
-
+    indexFile.close();
     update_file_header_on_indexFile();
     indexFile.open(filename, ios::in | ios::binary);
     
@@ -688,6 +699,7 @@ Node* BTree::split(Node *node, int key) {
     return (key < split_key ? lnode: rnode);
 }
 Node* BTree::_split(Node *node, int key) {
+    cout << "_split!!\n";
     // have to modify list
     // 1. split_factor
     // 2. split 발생시 NextlevelBID 값 처리
@@ -699,6 +711,7 @@ Node* BTree::_split(Node *node, int key) {
     // 해당 노드의 parent 노드를 찾음
     Node *parent = node->parent;
     Node *lnode, *rnode;
+    
     lnode = new Node(blockSize);
     rnode = new Node(blockSize);
     lnode->leaf = false;
@@ -708,12 +721,12 @@ Node* BTree::_split(Node *node, int key) {
     // -> 새로운 노드가 추가 되었으므로 rnode 이후 모든 Node의 BID가 바뀜.
     enum {LEFT = true, RIGHT = false};
     if (number_of_entries_per_node(blockSize) % 2 != 0) {
-        bp_copy_node(lnode, node, LEFT, split_factor + 1);
-        bp_copy_node(rnode, node, RIGHT, split_factor);
+        bp_copy_non_leaf_node(lnode, node, LEFT, split_factor + 1);
+        bp_copy_non_leaf_node(rnode, node, RIGHT, split_factor);
     }
     else {
-        bp_copy_node(lnode, node, LEFT, split_factor);
-        bp_copy_node(rnode, node, RIGHT, split_factor);
+        bp_copy_non_leaf_node(lnode, node, LEFT, split_factor);
+        bp_copy_non_leaf_node(rnode, node, RIGHT, split_factor);
     }
     // lnode, rnode NextlevelBID init
     lnode->NextlevelBID = node->NextlevelBID;
@@ -742,9 +755,22 @@ Node* BTree::_split(Node *node, int key) {
         }
         delete node;
     }
+    cout << "!L!";
+    cout << lnode->NextlevelBID << " / ";
+    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+        cout << lnode->entries[i].key << " " << lnode->entries[i].value << " " << lnode->entries[i].BID << " /";
+    }
+
+    cout << "!R!";
+    cout << rnode->NextlevelBID << " / ";
+    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+        cout << rnode->entries[i].key << " " << rnode->entries[i].value << " " << rnode->entries[i].BID << " /";
+    }
+    cout << endl;
     // parent 노드에 rnode 추가 <key, BID>
+    cout << "_split : parent -> BID : " << parent->entries[0].BID << endl;
     parent->insertIndexEntry(rnode->entries[0].key, rnode->myBID);
-    
+    cout << "_split : parent -> BID : " << parent->entries[0].BID << endl;
     if (parent != root) {
         // apply to bin file
         // 1. update BID for bigger than lnode BID except root
@@ -754,22 +780,64 @@ Node* BTree::_split(Node *node, int key) {
         
         // update non-leaf node's BID for non-leaf node's NextlevelBID, entry's BID > lnode BID, ++BID
         // (rnode path 오른쪽 Block 들에 대해 ++BID)
-        
-
     }
     update_BID_on_indexFile(lnode->myBID);
     rootBID = ++root->myBID;
     // update lnode on indexFile
-    update_lnode_on_indexFile(lnode);
+    update_non_leaf_lnode_on_indexFile(lnode); // have to change this function for non_leaf
     // update rnode on indexFile
-    update_rnode_on_indexFile(rnode);
+    update_non_leaf_rnode_on_indexFile(rnode); // have to change this function for non_leaf
+    fstream indexFile(filename, ios::in| ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "START Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    indexFile.close();
     // update root on indexFile
     if (NODE_IS_ROOT) {
         rootBID = root->myBID;
         update_root_on_indexFile();
     }
+    
+    indexFile.open(filename, ios::in | ios::binary);
+    
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    indexFile.close();
+    
     // update file_header
     update_file_header_on_indexFile();
+    
+    indexFile.open(filename, ios::in | ios::binary);
+    
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    
     return (split_key < key ? lnode: rnode);
 }
 bool BTree::find_leaf_node_by_key(int key, Node **node) {
@@ -827,7 +895,7 @@ int BTree::find_entry_by_key(Node *node, int key) {
         else if (node->entries[i].key == 0)
             return node->entries[i - 1].BID;
     }
-    return 0;    // return NULL value. ( 0 == NULL on BID )
+    return node->entries[number_of_entries_per_node(blockSize) - 1].BID;    // return NULL value. ( 0 == NULL on BID )
 }
 Node* BTree::find_Node_by_BID(int BID) {
     ifstream indexFile(filename, ios::in | ios::binary);
@@ -898,6 +966,27 @@ void BTree::bp_copy_node (Node *target_node, Node *node, bool start, int size) {
         }
     }
 }
+void BTree::bp_copy_non_leaf_node(Node *target_node, Node *node, bool start, int size) {
+    enum {LEFT = true, RIGHT = false};
+    if (start == LEFT) {
+        target_node->myBID = node->myBID;
+        target_node->parent_BID = node->parent_BID;
+        target_node->parent = node->parent;
+        for (int i = 0; i < size; ++i) {
+            target_node->fill_entry(node->entries[i].key, node->entries[i].BID);
+        }
+    }
+    else {
+        target_node->myBID = node->myBID + 1;
+        target_node->parent_BID = node->parent_BID;
+        target_node->parent = node->parent;
+        for (int i = size; i < number_of_entries_per_node(blockSize); ++i) {
+            target_node->fill_entry(node->entries[i].key, node->entries[i].BID);
+        }
+    }
+
+}
+
 void BTree::set_o_filename(const char* filename) {
     this->output_filename = filename;
 }
@@ -926,7 +1015,7 @@ bool BTree::update_root_on_indexFile() {
     indexFile.write(reinterpret_cast<char*>(&root->NextlevelBID), sizeof(int));
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
         indexFile.write(reinterpret_cast<char*>(&root->entries[i].key), sizeof(int));
-        indexFile.write(reinterpret_cast<char*>(&root->entries[i].value), sizeof(int));
+        indexFile.write(reinterpret_cast<char*>(&root->entries[i].BID), sizeof(int));
     }
     indexFile.close();
     return true;
@@ -935,6 +1024,17 @@ bool BTree::update_root_on_indexFile() {
 bool BTree::update_lnode_on_indexFile(Node* lnode) {
     cout << "BTree::update_lnode_on_indexFile(Node* lnode) : " << lnode->myBID << endl;
     fstream indexFile(filename, ios::in | ios::out | ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
     indexFile.seekp(physical_offset_of_PageID(lnode->myBID, blockSize), ios::beg);
     for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
         indexFile.write(reinterpret_cast<char*>(&lnode->entries[i].key), sizeof(int));
@@ -1032,6 +1132,117 @@ bool BTree::update_rnode_on_indexFile(Node* rnode) {
     cout << endl;
     return true;
 }
+bool BTree::update_non_leaf_lnode_on_indexFile(Node *lnode) {
+    cout << "BTree::update_non_leaf_lnode_on_indexFile(Node *lnode) : " << lnode->myBID << endl;
+    fstream indexFile(filename, ios::in | ios::out | ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    indexFile.seekp(physical_offset_of_PageID(lnode->myBID, blockSize), ios::beg);
+    indexFile.write(reinterpret_cast<char*>(&lnode->NextlevelBID), sizeof(int));
+    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+        indexFile.write(reinterpret_cast<char*>(&lnode->entries[i].key), sizeof(int));
+        indexFile.write(reinterpret_cast<char*>(&lnode->entries[i].BID), sizeof(int));
+    }
+    indexFile.close();
+    return true;
+}
+bool BTree::update_non_leaf_rnode_on_indexFile(Node *rnode) {
+    cout << "BTree::update_non_leaf_rnode_on_indexFile(Node *rnode) : " << rnode->myBID << endl;
+    fstream indexFile(filename, ios::in| ios::binary);
+    fstream tmp("tmp", ios::out | ios::binary);
+    indexFile.seekg(0, ios::end);
+    long size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    int data;
+    indexFile.seekg(0, ios::beg);
+    for (int i = 0; i < size; ++i) {
+        indexFile.read(reinterpret_cast<char*>(&data), sizeof(int));
+        tmp.write(reinterpret_cast<char*>(&data), sizeof(int));
+    }
+    indexFile.close();
+    tmp.close();
+    
+    // copy tmp to indexFile
+    indexFile.open(filename, ios::out | ios::binary);
+    tmp.open("tmp", ios::in | ios::binary);
+    
+    cout << "tmp file contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        tmp.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    
+    
+    
+    indexFile.seekp(0, ios::beg);
+    tmp.seekg(0, ios::beg);
+    
+    // file_header copy
+    for (int i = 0; i < 3; ++i) {
+        tmp.read(reinterpret_cast<char*>(&data), sizeof(int));
+        indexFile.write(reinterpret_cast<char*>(&data), sizeof(int));
+        --size;
+    }
+    // copy before rnode's BID
+    for (int i = 1; i < rnode->myBID; ++i) {
+        for (int j = 0; j < number_of_data_per_node(blockSize); ++j) {
+            tmp.read(reinterpret_cast<char*>(&data), sizeof(int));
+            indexFile.write(reinterpret_cast<char*>(&data), sizeof(int));
+            --size;
+        }
+    }
+    
+    // write rnode on indexFile
+    //    indexFile.seekp(physical_offset_of_PageID(rnode->myBID, blockSize), ios::beg);
+    indexFile.write(reinterpret_cast<char*>(&rnode->NextlevelBID), sizeof(int));
+    for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
+        indexFile.write(reinterpret_cast<char*>(&rnode->entries[i].key), sizeof(int));
+        indexFile.write(reinterpret_cast<char*>(&rnode->entries[i].BID), sizeof(int));
+    }
+    
+    cout << "back data : ";
+    while (size != 0) {
+        tmp.read(reinterpret_cast<char*>(&data), sizeof(int));
+        indexFile.write(reinterpret_cast<char*>(&data), sizeof(int));
+        cout << data << " ";
+        --size;
+    }
+    cout << endl;
+    indexFile.close();
+    indexFile.open(filename, ios::in | ios::binary);
+    
+    indexFile.seekg(0, ios::end);
+    size = indexFile.tellg() / 4;
+    // copy indexFile to tmp
+    indexFile.seekg(0, ios::beg);
+    cout << "!!!!END Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        indexFile.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    return true;
+}
 
 bool BTree::update_non_leaf_node_on_indexFile(Node *v) {
     cout << "BTree::update_non_leaf_node_on_indexFile(Node *v) : " << v->myBID << endl;
@@ -1054,6 +1265,7 @@ bool BTree::update_non_leaf_node_on_indexFile(Node *v) {
         indexFile.write(reinterpret_cast<char*>(&v->entries[i].BID), sizeof(int));
     }
     indexFile.close();
+    
     indexFile.open(filename, ios::in | ios::binary);
     
     indexFile.seekg(0, ios::end);
@@ -1107,20 +1319,41 @@ bool BTree::update_leaf_node_on_indexFile(Node* v) {
 }
 bool BTree::update_BID_on_indexFile(int BID) {
     cout << "BTree::update_BID_on_indexFile : " << BID << endl;
-    fstream indexFile(filename, ios::in | ios::out | ios::binary);
     // have to fix error line 821
+    
+    fstream input(filename, ios::in | ios::out | ios::binary);
+    input.seekg(0, ios::end);
+    long size = input.tellg() / 4;
+    // copy indexFile to tmp
+    input.seekg(0, ios::beg);
+    cout << "Index_File contents : ";
+    for (int i = 0; i < size; ++i) {
+        int x;
+        input.read(reinterpret_cast<char*>(&x), sizeof(int));
+        cout << x << " ";
+    }
+    cout << endl;
+    input.close();
+    
+    /////////////////////////////////////////////////////////////////////////////////
     int first_non_leaf_node_BID = find_last_leaf_node_BID() + 1;
+    // update leaf node's NextBID
     for (int i = BID + 1; i < first_non_leaf_node_BID; ++i) {
-        Node* v = find_Node_by_BID(i);
+        Node* v = find_leaf_node_by_BID(i);
+        if (v->NextBID == 0)
+            break;
         ++v->NextBID;
         update_leaf_node_on_indexFile(v);
     }
 ////    if (first_non_leaf_node_BID > rootBID) {
 ////        return true;
 ////    }
+    fstream indexFile(filename, ios::in | ios::out | ios::binary);
     indexFile.seekg(physical_offset_of_PageID(BID, blockSize), ios::beg);
     indexFile.seekp(physical_offset_of_PageID(BID, blockSize), ios::beg);
     for (int j = 0; j < rootBID - first_non_leaf_node_BID; ++j) {
+        cout << "Excuted!! for (int j = 0; j < rootBID - first_non_leaf_node_BID; ++j) {\n";
+        cout << rootBID << " " << first_non_leaf_node_BID << endl;
         Node *tmp = new Node(blockSize);
         indexFile.read(reinterpret_cast<char*>(&tmp->NextlevelBID), sizeof(int));
         for (int i = 0; i < number_of_entries_per_node(blockSize); ++i) {
@@ -1152,8 +1385,9 @@ int BTree::find_last_leaf_node_BID () {
         indexFile.read(reinterpret_cast<char*>(&NextBID), sizeof(int));
         ++last_leaf_node_BID;
         if (last_leaf_node_BID < rootBID)
-            indexFile.seekg(12, ios::cur);
+            indexFile.seekg(blockSize - 4, ios::cur);
     } while (NextBID != NULL_BID);
+    cout << "return last_leaf_node_BID; " << last_leaf_node_BID << endl;
     return last_leaf_node_BID;
 }
 
